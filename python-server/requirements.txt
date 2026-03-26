@@ -1,0 +1,4 @@
+cat > requirements.txt << 'EOF'
+Flask==2.3.2
+flask-cors==4.0.0
+EOF
