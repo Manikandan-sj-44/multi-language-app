@@ -8,17 +8,62 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
-    
+      uses: actions/checkout@v4
+
     - name: Deploy to EC2
       env:
         EC2_HOST: ${{ secrets.EC2_HOST }}
         EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
       run: |
+        echo "Setting up SSH key..."
         echo "$EC2_SSH_KEY" > key.pem
         chmod 600 key.pem
-        ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_HOST "echo 'Connected to EC2' && python3 --version && gcc --version && node --version"
 
+        echo "Testing SSH connection..."
+        ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_HOST "echo SSH connection successful"
+
+        echo "Running deployment script on EC2..."
+        ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_HOST << 'EOF'
+          echo "Connected to EC2. Starting deployment..."
+
+          # Install dependencies if missing
+          sudo apt update
+          sudo apt install -y python3 python3-pip python3-venv gcc nodejs npm git
+
+          cd ~
+          if [ -d "multi-language-app" ]; then
+            cd multi-language-app && git pull
+          else
+            git clone https://github.com/${{ github.repository }}.git multi-language-app
+            cd multi-language-app
+          fi
+
+          # Python server
+          cd python-server
+          python3 -m venv venv
+          source venv/bin/activate
+          pip3 install flask flask-cors
+          pkill -f "python3 app.py" || true
+          nohup python3 app.py > python.log 2>&1 &
+          cd ..
+
+          # C server
+          cd c-server
+          gcc -o c_server server.c
+          pkill -f "./c_server" || true
+          nohup ./c_server > c.log 2>&1 &
+          cd ..
+
+          # Frontend
+          cd frontend
+          npm install
+          npm run build
+          pkill -f "serve" || true
+          nohup npx serve -s build -l 3000 > frontend.log 2>&1 &
+          cd ..
+
+          echo "Deployment completed!"
+        EOF
